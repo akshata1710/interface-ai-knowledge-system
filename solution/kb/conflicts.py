@@ -91,6 +91,18 @@ def slot_topic(f: Fact) -> str:
     return t
 
 
+def _claim_topic(key: str) -> str:
+    if key == "membership total":
+        return "Total membership (number of members)"
+    if key == "assets total":
+        return "Total assets"
+    if key.startswith("# time "):
+        return f"Recognition count: Nth time {key[7:].strip()} (ordinal)".replace("forbes", "Forbes")
+    if key.startswith("# "):
+        return "Number of " + key[2:]
+    return key
+
+
 class ConflictDetector:
     def __init__(self, store: PageStore, rindex: RateIndex, pindex):
         self.store = store
@@ -100,7 +112,29 @@ class ConflictDetector:
     def detect(self) -> list[ConflictRec]:
         if not self.store.snapshots:
             return []
-        out = self._rate_conflicts() + self._claim_conflicts()
+        rate = self._rate_conflicts()
+        # business tables mirror the personal ones; report a business slot only if it differs
+        def unbiz(t):
+            return t.replace("Business ", "", 1)
+        personal = {c.topic: c for c in rate if "Business " not in c.topic}
+        rate = [c for c in rate if not ("Business " in c.topic and unbiz(c.topic) in personal and
+                                        personal[unbiz(c.topic)].values[-1] == c.values[-1])]
+        # refinance tables track the purchase tables; fold each into its purchase twin
+        by_topic = {c.topic: c for c in rate}
+        merged = []
+        for c in rate:
+            if " refinance " in f" {c.topic} ":
+                twin = by_topic.get(c.topic.replace("refinance ", "", 1))
+                if twin is not None:
+                    for v in c.values[:-1]:
+                        if v not in twin.values:
+                            twin.values.insert(len(twin.values) - 1, v)
+                    twin.sources = (twin.sources + c.sources)[:8]
+                    twin.reason += " (Refinance table shows the same pattern: " + c.values[-1] + " now.)"
+                    continue
+            merged.append(c)
+        rate = merged
+        out = rate + self._claim_conflicts()
         # stable, most important first
         out.sort(key=lambda c: (-c.priority, c.topic))
         return out
@@ -223,7 +257,7 @@ class ConflictDetector:
                 it = max((i for i in items if i[0] == val), key=lambda i: i[1] or date.min)
                 srcs.append((it[2], sid_last, it[3][:200]))
             out.append(ConflictRec(
-                topic=key, values=values[-6:], sources=srcs[-6:], resolution=winner,
+                topic=_claim_topic(key), values=values[-6:], sources=srcs[-6:], resolution=winner,
                 reason=(f"Several pages repeat this statement with different numbers; the most recently "
                         f"published one ({url_path(newest[2])}, {newest[1].isoformat()}) says {winner}."),
                 priority=1.5))

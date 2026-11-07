@@ -29,7 +29,7 @@ FAMILIES: list[Family] = [
     Family("hsa", "Health Savings Account", r"\bhsa\b|health savings", r"health savings", "deposit"),
     Family("high_yield", "High-Yield Savings", r"high[- ]?yield savings|high[- ]?yield money|high[- ]?yield account",
            r"high-yield savings|high yield savings", "deposit"),
-    Family("achieve", "Achieve Money Market", r"achieve", r"achieve money market", "deposit"),
+    Family("achieve", "Achieve Money Market", r"achieve", r"\bachieve\b", "deposit"),
     Family("investors_choice", "Investor's Choice Money Market", r"investor'?s'? choice|money market",
            r"investor'?s choice", "deposit"),
     Family("ira_variable", "Variable-rate IRA", r"(variable|savings) ira|ira savings|variable[- ]rate ira",

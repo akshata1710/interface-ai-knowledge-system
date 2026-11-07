@@ -55,13 +55,17 @@ class TemporalKnowledge:
             self.pindex.add_version(vid)
             self.rindex.facts_for_vid(vid)
         self.pindex.finalize()
+        self.answerer.warm()
         self._conflicts = None
         self._cache.clear()
 
     def answer(self, question: str, as_of: Optional[str] = None) -> Answer:
         key = (question.strip().lower(), as_of)
         if key not in self._cache:
-            r = self.answerer.answer(question, iso_to_date(as_of) if as_of else None)
+            try:
+                r = self.answerer.answer(question, iso_to_date(as_of) if as_of else None)
+            except Exception as exc:  # never crash the caller; an honest "don't know" beats a stack trace
+                r = self.answerer._refuse(f"I couldn't answer that reliably ({type(exc).__name__}).")
             self._cache[key] = r
         r = self._cache[key]
         return Answer(text=r.text,

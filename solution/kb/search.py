@@ -69,6 +69,13 @@ class PassageIndex:
             self.passages[pid].vids.append(vid)
             self._vid_passages[vid].append(pid)
 
+    def spread(self, pid: int) -> int:
+        """Number of distinct pages a passage appears on (site-wide footers appear on hundreds)."""
+        p = self.passages[pid]
+        if not hasattr(p, "_spread"):
+            p._spread = len({self.store.versions[v].url for v in p.vids})
+        return p._spread
+
     def finalize(self) -> None:
         self.N = max(1, len(self.passages))
         self.avgdl = sum(self.doclen) / self.N if self.doclen else 1.0

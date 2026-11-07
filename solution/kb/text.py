@@ -133,7 +133,7 @@ def stem(t: str) -> str:
 _STOP_STEMS = None
 
 
-_PHRASES = [(re.compile(r"become (a )?member|membership|sign up"), " join "),
+_PHRASES = [(re.compile(r"become (a |an )?([a-z]+ )?member|membership|sign up"), " join "),
             (re.compile(r"\bcd\b|\bcds\b"), " certificate "),
             (re.compile(r"home\$tart"), " homestart ")]
 

@@ -30,7 +30,7 @@ FAMILIES: list[Family] = [
     Family("high_yield", "High-Yield Savings", r"high[- ]?yield savings|high[- ]?yield money|high[- ]?yield account",
            r"high-yield savings|high yield savings", "deposit"),
     Family("achieve", "Achieve Money Market", r"achieve", r"\bachieve\b", "deposit"),
-    Family("investors_choice", "Investor's Choice Money Market", r"investor'?s'? choice|money market",
+    Family("investors_choice", "Investor's Choice Money Market", r"investor'?s'? choice",
            r"investor'?s choice", "deposit"),
     Family("ira_variable", "Variable-rate IRA", r"(variable|savings) ira|ira savings|variable[- ]rate ira",
            r"variable iras|ira.*\$[\d,]+", "deposit"),
@@ -112,6 +112,9 @@ def families_in_question(q: str) -> list[str]:
     for fam in FAMILIES:
         if re.search(fam.q, ql):
             out.append(fam.key)
+    # a generic "money market" question covers every money market product
+    if re.search(r"money ?market", ql) and not set(out) & {"investors_choice", "achieve", "high_yield"}:
+        out += ["investors_choice", "achieve", "high_yield"]
     # disambiguation between overlapping patterns
     s = set(out)
     if "business_platinum" in s:

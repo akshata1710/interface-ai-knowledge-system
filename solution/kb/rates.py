@@ -303,13 +303,19 @@ def select(spec: QSpec, facts: list[Fact]) -> tuple[list[Fact], Optional[str]]:
                     best = min(f.quals["amount"][1] for f in caps)
                     inside = [f for f in caps if f.quals["amount"][1] == best]
                 c = inside + [f for f in c if not f.quals.get("amount") and spec.term is None and False]
-    if spec.superlative and c:
-        metric = spec.metric or ("apy" if any("apy" in f.metrics for f in c) else "apr")
-        vals = [(_num(f, metric), f) for f in c if _num(f, metric) is not None]
-        if vals:
-            target = max(v for v, _ in vals) if spec.superlative == "max" else min(v for v, _ in vals)
-            c = [f for v, f in vals if v == target]
     return c, None
+
+
+def apply_superlative(spec: QSpec, c: list[Fact]) -> list[Fact]:
+    """'highest'/'lowest'/'best' — applied only after stale rows have been resolved away."""
+    if not spec.superlative or not c:
+        return c
+    metric = spec.metric or ("apy" if any("apy" in f.metrics for f in c) else "apr")
+    vals = [(_num(f, metric), f) for f in c if _num(f, metric) is not None]
+    if not vals:
+        return c
+    target = max(v for v, _ in vals) if spec.superlative == "max" else min(v for v, _ in vals)
+    return [f for v, f in vals if v == target]
 
 
 def _num(f: Fact, metric: str) -> Optional[float]:

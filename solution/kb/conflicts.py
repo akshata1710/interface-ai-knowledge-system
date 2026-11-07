@@ -242,7 +242,7 @@ class ConflictDetector:
             for val, d, u, s in items:
                 by_val[val].add(u)
             pages = {u for _, _, u, _ in items}
-            need = 2 if key.startswith("# time") or "consecutive" in key or "in a row" in key else 3
+            need = 2
             if len(by_val) < 2 or len(pages) < need:
                 continue
             dated = [it for it in items if it[1]]
@@ -292,6 +292,9 @@ class ConflictDetector:
                                        "billion", "million"):
                 continue
             if not re.search(r"branch|location|count|employee|member|atm|state|office", " ".join(noun)):
+                continue
+            if noun[0] in ("members", "member-owners", "member", "member-owner"):
+                yield "membership total", num     # one concept, however it is phrased
                 continue
             yield "# " + " ".join(noun), num
         # "membership has grown to 179,000" / "membership totals 141,000" / "assets exceeding $3.6 billion"

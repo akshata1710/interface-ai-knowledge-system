@@ -18,7 +18,7 @@ from datetime import date
 from typing import Optional
 
 from .products import unpublished_product
-from .rates import RateIndex, fact_sources, parse_question, render_facts, select
+from .rates import RateIndex, apply_superlative, fact_sources, parse_question, render_facts, select
 from .search import PassageIndex
 from .store import PageStore, url_path
 from .text import (links_in, month_year_in, split_sentences, stem, strip_links, tokens, words_to_digits)
@@ -43,6 +43,17 @@ class Answerer:
         self.pindex = pindex
         self.rindex = rindex
 
+    def warm(self) -> None:
+        """Precompute per-view caches after ingest (ingest is untimed; answers are)."""
+        self.__dict__.pop("_sched_cache", None)
+        self.__dict__.pop("_series_cache", None)
+        self.__dict__.pop("_phone_cache", None)
+        last = len(self.store.snapshots) - 1
+        for kind in ("lobby", "drive"):
+            self._schedules(last, kind)
+        self._main_phone(last)
+        self.rindex.facts_in_view(last)
+
     # ------------------------------------------------------------------ entry
     def answer(self, question: str, as_of: Optional[date]) -> Result:
         q = question.strip()
@@ -59,8 +70,8 @@ class Answerer:
             snap = self.store.snapshots[view]
             prefix = f"As of {as_of.strftime('%B %d, %Y').replace(' 0', ' ')} (website as crawled {snap.taken_on.strftime('%B %d, %Y').replace(' 0', ' ')}): "
 
-        for handler in (self._unpublished, self._branch_specific, self._url_question, self._hours,
-                        self._rates, self._general):
+        for handler in (self._unpublished, self._branch_specific, self._label_value, self._url_question,
+                        self._hours, self._rates, self._general):
             r = handler(q, ql, view)
             if r is not None:
                 if prefix and r.confident:
@@ -129,11 +140,18 @@ class Answerer:
         if re.search(r"\bclos(e|es|ed|ing)\b|still open|open today|shut", ql) and "hour" not in ql:
             return None  # "is the X branch closing?" is a news question, handled by retrieval
         hits = []
-        for url, vid in self.store.views[view].items():
+        live = set(self.store.views[view].values())
+        rare = min(name_toks, key=lambda t: len(self.pindex.postings.get(t, [])))
+        for pid, _tf in self.pindex.postings.get(rare, []):
+            p = self.pindex.passages[pid]
+            vids = [x for x in p.vids if x in live]
+            if not vids:
+                continue
+            vid = vids[0]
             v = self.store.versions[vid]
             if v.kind in ("listing", "boilerplate", "calculator"):
                 continue
-            for p in self.pindex.passages_of(vid):
+            if True:
                 pt = set(tokens(p.heading + " " + p.text))
                 if not all(t in pt for t in name_toks):
                     continue
@@ -160,6 +178,44 @@ class Answerer:
             txt = f"{name.title()} branch lobby hours: {sched}." + (f" Drive-up: {drive}." if drive else "")
             return Result(text=txt, sources=[self._src(vid, view, p.text)])
         return Result(text=_tidy(p.text[:500]), sources=[self._src(vid, view, p.text)])
+
+    # ------------------------------------------------------------------ 2b. "Label: value" facts
+    _ATTR_Q = re.compile(r"\b(?:what(?:'s| is| are)|tell me|give me|repeat|need|provide|share)\b.*?\b(routing|aba|swift|"
+                         r"nmls|fax|email|e-mail|mailing address|tax id|ein)\b(?:\s+(number|code|address|id))?")
+
+    def _label_value(self, q, ql, view):
+        m = self._ATTR_Q.search(ql) or re.search(r"\b(routing|nmls|swift)\s+(number|code)", ql)
+        if not m:
+            return None
+        attr = m.group(1)
+        pat = re.compile(rf"\b{re.escape(attr)}[\w ]{{0,20}}?(?:number|code|#|address)?\s*[:#]\s*([A-Za-z0-9@.\-]{{4,40}})",
+                         re.I)
+        counts: Counter = Counter()
+        where: dict = {}
+        for url, vid in self.store.views[view].items():
+            v = self.store.versions[vid]
+            if attr.lower() not in v.text.lower():
+                continue
+            for mm in pat.finditer(strip_links(v.text)):
+                val = mm.group(1).rstrip(".")
+                counts[val] += 1
+                if val not in where or (v.kind == "product" and self.store.versions[where[val]].kind != "product"):
+                    where[val] = vid
+        if not counts:
+            return None   # let retrieval (and its refusal rules) handle it
+        val, _ = counts.most_common(1)[0]
+        label = {"aba": "ABA routing number", "routing": "routing number", "nmls": "NMLS number",
+                 "swift": "SWIFT code"}.get(attr, attr)
+        # cite the pages that state it, product pages first
+        cites = [where[val]]
+        for url, vid in self.store.views[view].items():
+            v = self.store.versions[vid]
+            if vid not in cites and v.kind == "product" and val in v.text:
+                cites.append(vid)
+            if len(cites) >= 3:
+                break
+        return Result(text=f"{self.store.site_name}'s {label} is {val}.",
+                      sources=[self._src(v, view, f"{label}: {val}") for v in cites])
 
     # ------------------------------------------------------------------ 3. URL questions
     def _url_question(self, q, ql, view):
@@ -208,7 +264,11 @@ class Answerer:
         if not cand:
             return None
         best = max(cand.items(), key=lambda kv: (kv[1], -len(kv[0])))[0]
-        return Result(text=f"Use {best} ({strip_links(anchor_txt.get(best, '')).strip() or 'Dupaco'}).",
+        best = re.sub(r"#[\w\-]*_\d{6,}$", "", best)          # drop auto-generated widget anchors
+        anchor = strip_links(anchor_txt.get(best, "")).strip()
+        label = f" ({anchor})" if len(anchor) > 6 and anchor.lower() not in ("website", "click here", "here",
+                                                                               "learn more", "explore") else ""
+        return Result(text=f"Use {best}{label}.",
                       sources=[(best, self.store.snapshots[view].snapshot_id, None)])
 
     def _site_host(self) -> str:
@@ -326,6 +386,7 @@ class Answerer:
                       "no-year": "for that model year"}.get(why, "")
             return self._refuse(f"That rate isn't listed on Dupaco's website: the {name} table has no entry {detail}.")
         kept, dropped, extra = self.rindex.resolve(chosen, view)
+        kept = apply_superlative(spec, kept)
         if not kept:
             return None
         text = render_facts(kept, spec)
@@ -383,6 +444,8 @@ class Answerer:
             if v.published:
                 age = max(0.0, (today - v.published).days / 365.0)
                 rec = 1.0 / (1.0 + 0.12 * age)
+            if self.pindex.spread(p.pid) > 25:
+                auth *= 0.35  # site-wide footer / nav boilerplate
             if re.search(r"\(Required\)|First Name\*|\bPreviousNext\b|\b\d{1,2}%\s*(Next|Previous)|Something went wrong",
                          p.text):
                 auth *= 0.2   # form widgets, not content
@@ -498,6 +561,8 @@ class Answerer:
                         sc *= 1.6     # the question's multi-word name ("share savings") appears verbatim
                 if sent.startswith(("“", '"')):
                     sc *= 0.8           # quotes are mostly colour
+                if len(sent.split()) < 7 and not re.search(r"\d", sent):
+                    sc *= 0.6           # button labels / fragments rarely answer anything
                 if re.match(r"[_*]*\d[A-Z]", sent):
                     sc *= 0.6           # footnote fine print ("1Term Share Certificate Rates: ...")
                 if lead > 1.0:

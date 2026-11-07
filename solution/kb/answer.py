@@ -10,7 +10,6 @@ Handlers, in order:
 """
 from __future__ import annotations
 
-import math
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -156,15 +155,14 @@ class Answerer:
             v = self.store.versions[vid]
             if v.kind in ("listing", "boilerplate", "calculator"):
                 continue
-            if True:
-                pt = set(tokens(p.heading + " " + p.text))
-                if not all(t in pt for t in name_toks):
-                    continue
-                if wants_hours and _HOURS_RE.search(p.text):
-                    hits.append((vid, p))
-                elif not wants_hours and (re.search(r"\b\d{2,6}\s+[A-Z][\w.]*.*\b\d{5}\b", p.text) or
-                                          _LOCATED_RE.search(p.text)):
-                    hits.append((vid, p))
+            pt = set(tokens(p.heading + " " + p.text))
+            if not all(t in pt for t in name_toks):
+                continue
+            if wants_hours and _HOURS_RE.search(p.text):
+                hits.append((vid, p))
+            elif not wants_hours and (re.search(r"\b\d{2,6}\s+[A-Z][\w.]*.*\b\d{5}\b", p.text) or
+                                      _LOCATED_RE.search(p.text)):
+                hits.append((vid, p))
         if not hits:
             what = "hours" if wants_hours else "address"
             return self._refuse(f"I couldn't find published {what} for a {name.title()} branch on Dupaco's website, "

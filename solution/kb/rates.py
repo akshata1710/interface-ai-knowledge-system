@@ -18,10 +18,10 @@ from datetime import date
 from typing import Optional
 
 from .products import (CARD_FAMILIES, FAMILY_BY_KEY, families_in_question, family_of_fact,
-                       unpublished_product, wants_card_list)
+                       wants_card_list)
 from .store import PageStore, url_path
 from .tables import Fact, extract_facts, parse_quals
-from .text import fmt_pct, parse_money, words_to_digits
+from .text import parse_money, words_to_digits
 
 TIER = {"rates": 2, "product": 2, "landing": 1, "document": 1, "news": 0, "blog": 0, "calculator": 0,
         "listing": -1, "boilerplate": -1, "expired": -2}
@@ -137,8 +137,7 @@ class RateIndex:
             out = []
             for url, vid in self.store.views[view].items():
                 for f in self.facts_for_vid(vid):
-                    f2 = f
-                    out.append(f2)
+                    out.append(f)
             self._view_cache[view] = out
         return self._view_cache[view]
 
@@ -335,7 +334,6 @@ def _num(f: Fact, metric: str) -> Optional[float]:
 # --------------------------------------------------------------------------- formatting
 
 def _sort_key(f: Fact):
-    fl = f.quals.get("flags", set())
     amt = f.quals.get("amount")
     fam = f.quals.get("family")
     if fam == "mortgage":

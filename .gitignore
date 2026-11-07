@@ -1,0 +1,10 @@
+# Supplied data is not redistributed: put the kit's snapshot zips in snapshots_zip/ (or unpacked folders in snapshots/)
+snapshots/0*
+snapshots_zip
+*.zip
+results/
+__pycache__/
+*.pyc
+.DS_Store
+.env
+*.pdf

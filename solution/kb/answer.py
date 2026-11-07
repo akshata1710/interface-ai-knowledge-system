@@ -68,7 +68,12 @@ class Answerer:
         prefix = ""
         if as_of is not None and view != len(self.store.snapshots) - 1:
             snap = self.store.snapshots[view]
-            prefix = f"As of {as_of.strftime('%B %d, %Y').replace(' 0', ' ')} (website as crawled {snap.taken_on.strftime('%B %d, %Y').replace(' 0', ' ')}): "
+            fmt = lambda d: d.strftime('%B %d, %Y').replace(' 0', ' ')  # noqa: E731
+            if as_of < snap.taken_on:
+                prefix = (f"My earliest copy of the website is from {fmt(snap.taken_on)}, so I can't see "
+                          f"{fmt(as_of)} directly; as of {fmt(snap.taken_on)}: ")
+            else:
+                prefix = f"As of {fmt(as_of)} (website as crawled {fmt(snap.taken_on)}): "
 
         for handler in (self._unpublished, self._branch_specific, self._label_value, self._url_question,
                         self._hours, self._rates, self._general):
@@ -416,7 +421,50 @@ class Answerer:
             note = ("Ignored stale/lower-authority values: " + "; ".join(bits[:4]) +
                     ". Used the official rate table with the newest effective date.")
         srcs = [(u, self.store.snapshots[view].snapshot_id, None) for u in fact_sources(kept, extra)]
+        if re.search(r"\b(chang\w*|previous\w*|used to|before|prior|earlier|increas\w*|decreas\w*|go(ne)? (up|down)|"
+                     r"went (up|down)|raise[ds]?|lower(ed)?|drop(ped)?|history|over time|move[ds]?)\b", ql):
+            hist = self._rate_history(kept[:4], view)
+            if hist:
+                text = hist
         return Result(text=(lead + text).strip(), sources=srcs, conflict_note=note)
+
+    def _rate_history(self, kept, view) -> Optional[str]:
+        """'Did the rate change?': every distinct value an official table showed for this slot, oldest first."""
+        from .rates import TIER, _compatible, _same_values
+        from .conflicts import fmt_fact
+        parts = []
+        for cur in kept:
+            seq = []   # (first_view, last_view, fact)
+            for v in range(0, view + 1):
+                match = [f for f in self.rindex.facts_in_view(v)
+                         if _compatible(f, cur) and TIER.get(f.kind, 0) >= TIER.get(cur.kind, 0) and f.url == cur.url]
+                if not match:
+                    continue
+                f = match[0]
+                if seq and _same_values(seq[-1][2], f):
+                    seq[-1] = (seq[-1][0], v, seq[-1][2])
+                else:
+                    seq.append((v, v, f))
+            if not seq:
+                continue
+            def when(a, b):
+                d1 = self.store.snapshots[a].taken_on.strftime("%b %d, %Y").replace(" 0", " ")
+                d2 = self.store.snapshots[b].taken_on.strftime("%b %d, %Y").replace(" 0", " ")
+                return f"the {d1} crawl" if a == b else f"crawls {d1} – {d2}"
+            from .products import FAMILY_BY_KEY
+            fam = FAMILY_BY_KEY.get(cur.quals.get("family"))
+            name = cur.label
+            if fam and not set(tokens(fam.name)) & set(tokens(name)):
+                name = f"{fam.name} {name}"
+            if len(seq) == 1:
+                parts.append(f"{name}: unchanged at {fmt_fact(cur)} across {when(seq[0][0], seq[0][1])}.")
+                continue
+            steps = []
+            for a, b, f in seq:
+                eff = f" (effective {f.effective.strftime('%m/%d/%Y')})" if f.effective else ""
+                steps.append(f"{fmt_fact(f)}{eff} in {when(a, b)}")
+            parts.append(f"{name} changed: " + " → ".join(steps) + f". Current: {fmt_fact(cur)}.")
+        return " ".join(parts) if parts else None
 
     # ------------------------------------------------------------------ 6. general retrieval
     def _general(self, q, ql, view):
